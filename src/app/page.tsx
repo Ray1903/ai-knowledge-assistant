@@ -1,103 +1,269 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { FormEvent, useEffect, useRef, useState } from "react";
+
+type Role = "user" | "assistant";
+type ChatMsg = { id: string; role: Role; content: string; meta?: string };
+
+type ApiChatResponse = {
+  routed: "rag" | "analyst";
+  message: { role: "assistant"; content: string };
+};
+
+export default function Page() {
+  const [messages, setMessages] = useState<ChatMsg[]>([
+    {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content:
+        "Hola, soy tu asistente. Sube un TXT/CSV y pregúntame. Usa `/note tu texto` para guardar una nota.",
+    },
+  ]);
+
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [creatingSession, setCreatingSession] = useState(true);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
+
+  // 1) Crear sesión persistente al cargar
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/chat/session", { method: "POST" });
+        const j = await res.json();
+        setSessionId(j.sessionId);
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "No pude crear la sesión de chat. Reintenta recargando la página.",
+          },
+        ]);
+      } finally {
+        setCreatingSession(false);
+      }
+    })();
+  }, []);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text || loading) return;
+
+    if (!sessionId) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: "La sesión aún no está lista." },
+      ]);
+      return;
+    }
+
+    // Comando rápido: /note ...
+    if (text.startsWith("/note ")) {
+      const noteText = text.slice(6).trim();
+      if (!noteText) return;
+      setInput("");
+      setLoading(true);
+      try {
+        const res = await fetch("/api/tools/save-note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: noteText }),
+        });
+        const j = await res.json();
+        const ok = (res.ok && j?.ok) || false;
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "user", content: text },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: ok ? `Nota guardada: ${j.id}` : `Error al guardar nota: ${j?.error || "desconocido"}`,
+          },
+        ]);
+      } catch (err: any) {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "user", content: text },
+          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${String(err)}` },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Chat normal multi-agente (envía sessionId)
+    const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const payload = {
+        sessionId,
+        messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
+      };
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const j: ApiChatResponse & { error?: string } = await res.json();
+      const assistantText = j?.message?.content || j?.error || "(sin respuesta)";
+      const meta = j?.routed ? `Agente: ${j.routed === "rag" ? "RAG" : "Analista"}` : undefined;
+
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: assistantText, meta },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${String(err)}` },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 2) Upload: además de chunks, muestra el perfil del dataset si vino en la respuesta
+  async function onSelectFile(file: File) {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const j = await res.json();
+
+      let msg = res.ok
+        ? `Archivo "${file.name}" procesado (${j.chunks} chunks).`
+        : `Error al subir: ${j.error}`;
+
+      if (res.ok && j.dataset) {
+        const ds = j.dataset as { rows: number; cols: number; inferredTask: string; target?: string | null };
+        msg += `\nDataset perfilado → filas: ${ds.rows}, columnas: ${ds.cols}, tarea: ${ds.inferredTask}` +
+               (ds.target ? `, target: ${ds.target}` : "");
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: msg, meta: "Ingesta/Perfilado" },
+      ]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${String(err)}` },
+      ]);
+    } finally {
+      setLoading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="h-screen grid grid-rows-[auto,1fr,auto] bg-neutral-950 text-neutral-100">
+      {/* Topbar */}
+      <header className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-semibold">AI Knowledge Assistant</h1>
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-neutral-400">
+            {creatingSession
+              ? "Creando sesión…"
+              : sessionId
+              ? `Sesión: ${sessionId.slice(0, 8)}…`
+              : "Sin sesión"}
+          </span>
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            accept=".txt,.csv,.md,.log,.json,.ts,.tsx,.js,.py"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onSelectFile(f);
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="rounded-2xl border border-neutral-700 px-3 py-1.5 hover:bg-neutral-800"
+            disabled={creatingSession}
+            title={creatingSession ? "Esperando sesión…" : "Subir archivo"}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Subir archivo
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+      </header>
+
+      {/* Mensajes */}
+      <div ref={listRef} className="overflow-y-auto px-4 py-4 space-y-4">
+        {messages.map((m) => (
+          <Bubble key={m.id} role={m.role} content={m.content} meta={m.meta} />
+        ))}
+        {loading && <div className="text-xs text-neutral-400 px-2">Generando respuesta…</div>}
+      </div>
+
+      {/* Input */}
+      <form onSubmit={handleSubmit} className="border-t border-neutral-800 px-4 py-3">
+        <div className="max-w-3xl mx-auto flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Escribe… (Enter envía, Shift+Enter salto). /note para notas."
+            rows={1}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                (e.currentTarget.form as HTMLFormElement)?.requestSubmit();
+              }
+            }}
+            className="flex-1 resize-none rounded-2xl border border-neutral-700 bg-neutral-900 px-4 py-2 focus:outline-none focus:ring-1 focus:ring-neutral-600"
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <button
+            type="submit"
+            disabled={loading || !input.trim() || creatingSession}
+            className="rounded-2xl border border-neutral-700 px-4 py-2 hover:bg-neutral-800 disabled:opacity-50"
+            title={creatingSession ? "Esperando sesión…" : "Enviar"}
+          >
+            Enviar
+          </button>
+        </div>
+      </form>
+    </main>
+  );
+}
+
+function Bubble({ role, content, meta }: { role: Role; content: string; meta?: string }) {
+  const isUser = role === "user";
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={[
+          "max-w-[80%] rounded-2xl px-4 py-2 whitespace-pre-wrap leading-relaxed",
+          isUser
+            ? "bg-blue-600/20 border border-blue-400/30"
+            : "bg-neutral-900 border border-neutral-700",
+        ].join(" ")}
+      >
+        {!isUser && (
+          <div className="text-xs text-neutral-400 mb-1">
+            Asistente {meta ? `• ${meta}` : ""}
+          </div>
+        )}
+        <div className="text-sm">{content}</div>
+      </div>
     </div>
   );
 }

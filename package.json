@@ -2,26 +2,41 @@
   "name": "ai-knowledge-assistant",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
+    "mcp": "tsx tools/mcp/server.ts",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "@prisma/client": "^6.13.0",
+    "@tanstack/react-query": "^5.84.2",
+    "csv-parse": "^6.1.0",
+    "form-data": "^4.0.4",
+    "multer": "^2.0.2",
+    "next": "15.4.6",
+    "openai": "^5.12.2",
+    "pg": "^8.16.3",
+    "pgvector": "^0.2.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.4.6"
+    "react-dropzone": "^14.3.8",
+    "simple-statistics": "^7.8.8",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/multer": "^2.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "15.4.6",
-    "@eslint/eslintrc": "^3"
+    "prisma": "^6.13.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }

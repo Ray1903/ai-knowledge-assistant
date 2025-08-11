@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  filename  String
+  mime      String
+  createdAt DateTime @default(now())
+  chunks    Chunk[]
+  dataset   DatasetProfile?
+}
+
+model Chunk {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content     String
+  embedding   Float[]
+  createdAt   DateTime @default(now())
+
+  @@index([documentId])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  text      String
+  createdAt DateTime @default(now())
+}
+
+model DatasetProfile {
+  id          String          @id @default(cuid())
+  documentId  String          @unique
+  document    Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  rows        Int
+  cols        Int
+  inferredTask String         // classification | regression | unknown
+  target      String?
+  createdAt   DateTime        @default(now())
+  columns     ColumnProfile[]
+}
+
+model ColumnProfile {
+  id        String   @id @default(cuid())
+  datasetId String
+  dataset   DatasetProfile @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name      String
+  dtype     String   // numeric | categorical | datetime | text
+  missing   Int
+  distinct  Int?
+  mean      Float?
+  std       Float?
+  min       Float?
+  max       Float?
+  p25       Float?
+  p50       Float?
+  p75       Float?
+
+  @@index([datasetId])
+}
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  title     String?
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String   // user | assistant
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
