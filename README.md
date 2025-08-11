@@ -20,6 +20,7 @@ npm install
 DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/assistant?schema=public"
 OPENAI_API_KEY=sk-xxx
 OPENAI_MODEL=gpt-4o-mini
+RAG_THRESHOLD=0.25
 ```
 
 ### 3) Base de datos en contenedor (`docker-compose.yml`)
